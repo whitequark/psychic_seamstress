@@ -13,3 +13,6 @@ features = ["gl3"]
 
 [dependencies.touptek]
 git = "https://github.com/whitequark/rust-touptek"
+
+[dependencies.png]
+git = "https://github.com/servo/rust-png"
