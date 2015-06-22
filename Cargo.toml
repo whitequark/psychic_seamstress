@@ -1,0 +1,15 @@
+[package]
+name = "psychic_seamstress"
+version = "0.1.0"
+authors = ["whitequark <whitequark@whitequark.org>"]
+
+[dependencies]
+gl = "*"
+glfw = "*"
+
+[dependencies.nanovg]
+git = "https://github.com/whitequark/nanovg-rs"
+features = ["gl3"]
+
+[dependencies.touptek]
+git = "https://github.com/whitequark/rust-touptek"
