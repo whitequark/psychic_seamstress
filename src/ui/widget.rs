@@ -3,8 +3,9 @@
 extern crate nanovg;
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
-use ui::{Point, Rect, Direction};
+use ui::{Property, Point, Rect, Direction};
 
 // Generic
 
@@ -35,6 +36,7 @@ pub trait Widget {
 
     fn project(&self, _point: Point) -> Option<(&Widget, Point)> { None }
     fn mouse_move(&self, _point: Point) {}
+    fn mouse_scroll(&self, _offset: Point) {}
     fn mouse_down(&self, _point: Point) {}
     fn mouse_up(&self, _point: Point) {}
     fn mouse_in(&self) {}
@@ -82,7 +84,7 @@ impl Style {
     fn get() -> &'static Style {
         static STYLE: Style = Style {
             font_face: "Roboto",
-            font_size: 32.,
+            font_size: 28.,
             passive_color: nanovg::Color::rgb_f(0.5, 0.5, 0.5),
             hover_color: nanovg::Color::rgb_f(1., 0.5, 0.),
             active_color: nanovg::Color::rgb_f(1., 1., 1.),
@@ -100,10 +102,10 @@ impl Style {
 pub struct Label<'nvg> {
     nvg: &'nvg nanovg::Context,
     state: RefCell<LabelState>,
+    text: Rc<Property<String>>,
 }
 
 struct LabelState {
-    text: String,
     size: Point,
 }
 
@@ -112,14 +114,13 @@ impl<'nvg> Label<'nvg> {
         Label {
             nvg: nvg,
             state: RefCell::new(LabelState {
-                text: String::from(""),
                 size: Point(0., 0.),
-            })
+            }),
+            text: Property::new(String::from("")),
         }
     }
 
-    pub fn text(&self) -> String { self.state.borrow().text.clone() }
-    pub fn set_text(&self, text: &str) { self.state.borrow_mut().text = String::from(text) }
+    pub fn text(&self) -> Rc<Property<String>> { self.text.clone() }
 }
 
 impl<'nvg> Widget for Label<'nvg> {
@@ -131,83 +132,89 @@ impl<'nvg> Widget for Label<'nvg> {
         self.nvg.font_size(Style::get().font_size);
 
         let mut bounds = [0.; 4];
-        self.nvg.text_bounds(0., 0., &self.state.borrow().text, &mut bounds);
+        self.nvg.text_bounds(0., 0., &self.text.get(), &mut bounds);
 
         Point(bounds[2] - bounds[0], bounds[3] - bounds[1])
     }
 
     fn render(&self) {
-        let state = self.state.borrow();
         self.nvg.font_face(&Style::get().font_face);
         self.nvg.font_size(Style::get().font_size);
         self.nvg.fill_color(Style::get().active_color);
         self.nvg.text_align(nanovg::LEFT | nanovg::TOP);
-        self.nvg.text(0., 0., &state.text);
+        self.nvg.text(0., 0., &self.text.get());
     }
 }
 
 // Slider
 
+#[derive(Copy, Clone, Debug)]
+pub struct SliderPosition {
+    pub current: f32,
+    pub minimum: f32,
+    pub maximum: f32,
+    pub step: f32,
+}
+
+impl SliderPosition {
+    pub fn validator(mut self) -> SliderPosition {
+        if self.maximum < self.minimum { self.maximum = self.minimum }
+        if self.step < 1e-6 { self.step = 1e-6 }
+        if self.current < self.minimum { self.current = self.minimum }
+        if self.current > self.maximum { self.current = self.maximum }
+        self.current = self.minimum +
+            ((self.current - self.minimum) / self.step).round() * self.step;
+        self
+    }
+
+    pub fn size(&self) -> f32 {
+        self.maximum - self.minimum
+    }
+
+    pub fn normalized(&self) -> f32 {
+        (self.current - self.minimum) / (self.maximum - self.minimum)
+    }
+
+    pub fn denormalized(&self, norm_value: f32) -> SliderPosition {
+        SliderPosition {
+            current: self.minimum + norm_value * (self.maximum - self.minimum),
+            ..*self
+        }
+    }
+
+    pub fn change(&self, new_value: f32) -> SliderPosition {
+        SliderPosition { current: new_value, ..*self }
+    }
+
+    pub fn offset(&self, offset: f32) -> SliderPosition {
+        SliderPosition { current: self.current + offset, ..*self }
+    }
+}
+
 pub struct Slider<'nvg> {
     nvg: &'nvg nanovg::Context,
-    update: Box<Fn(f32) + 'nvg>,
     state: RefCell<SliderState>,
+    position: Rc<Property<SliderPosition>>,
 }
 
 struct SliderState {
-    min: f32,
-    max: f32,
-    step: f32,
-    value: f32,
     size: Point,
     ui_state: State,
 }
 
 impl<'nvg> Slider<'nvg> {
-    pub fn new<U>(nvg: &'nvg nanovg::Context, update: U) -> Slider<'nvg>
-            where U: Fn(f32) + 'nvg {
+    pub fn new(nvg: &'nvg nanovg::Context, position: SliderPosition) -> Slider<'nvg> {
         Slider {
             nvg: nvg,
-            update: Box::new(update),
             state: RefCell::new(SliderState {
-                min: 0.,
-                max: 10.,
-                step: 1.,
-                value: 0.,
                 size: Point(0., 0.),
                 ui_state: State::Passive,
-            })
+            }),
+            position: Property::new_validated(position, SliderPosition::validator),
         }
     }
 
-    pub fn min(&self) -> f32 { self.state.borrow().min }
-    pub fn set_min(&self, mut value: f32) {
-        let max = self.max();
-        if value > max { value = max }
-        self.state.borrow_mut().min = value
-    }
-
-    pub fn max(&self) -> f32 { self.state.borrow().max }
-    pub fn set_max(&self, mut value: f32) {
-        let min = self.min();
-        if value < min { value = min }
-        self.state.borrow_mut().max = value
-    }
-
-    pub fn step(&self) -> f32 { self.state.borrow().step }
-    pub fn set_step(&self, mut value: f32) {
-        if value < 1. { value = 1. }
-        self.state.borrow_mut().step = value
-    }
-
-    pub fn value(&self) -> f32 { self.state.borrow().value }
-    pub fn set_value(&self, mut value: f32) {
-        let (min, max) = (self.min(), self.max());
-        if value < min { value = min }
-        if value > max { value = max }
-        self.state.borrow_mut().value = value;
-        (*self.update)(value)
-    }
+    pub fn position(&self) -> Rc<Property<SliderPosition>> { self.position.clone() }
 
     fn slider_offset() -> f32 { Style::get().font_size / 2. }
     fn puck_radius() -> f32 { Slider::slider_offset() / 2. }
@@ -224,11 +231,10 @@ impl<'nvg> Widget for Slider<'nvg> {
 
     fn render(&self) {
         let state = self.state.borrow();
-        let norm_value = (state.value - state.min) / (state.max - state.min);
 
         let mid_y = self.size().1 / 2.;
         let (left_x, right_x) = (Slider::slider_offset(), self.size().0 - Slider::slider_offset());
-        let puck_x = left_x + (right_x - left_x) * norm_value;
+        let puck_x = left_x + (right_x - left_x) * self.position.get().normalized();
 
         self.nvg.stroke_width(Style::get().line_size);
 
@@ -267,9 +273,16 @@ impl<'nvg> Widget for Slider<'nvg> {
         let (left_x, right_x) = (Slider::slider_offset(), self.size().0 - Slider::slider_offset());
         let norm_value = (point.0 - left_x) / (right_x - left_x);
         if self.state.borrow().ui_state == State::Active {
-            let new_value = (norm_value * (self.max() - self.min()) / self.step())
-                            .round() * self.step();
-            self.set_value(new_value);
+            self.position.set(self.position.get().denormalized(norm_value))
+        }
+    }
+
+    fn mouse_scroll(&self, offset: Point) {
+        let pos = self.position.get();
+        if offset.1 > 0. {
+            self.position.set(pos.offset(pos.step))
+        } else if offset.1 < 0. {
+            self.position.set(pos.offset(-pos.step))
         }
     }
 
@@ -393,22 +406,6 @@ impl<'nvg> Widget for BoxLayout<'nvg> {
         }
 
         None
-    }
-
-    fn mouse_move(&self, point: Point) {
-        let mut origin = Point(0., 0.);
-        for child in &self.children {
-            let size = child.size();
-
-            if Rect(origin, size).contains(point) {
-                return child.mouse_move(point - origin)
-            }
-
-            match self.direction {
-                Direction::Horizontal => origin.0 += size.0,
-                Direction::Vertical   => origin.1 += size.1
-            }
-        }
     }
 }
 

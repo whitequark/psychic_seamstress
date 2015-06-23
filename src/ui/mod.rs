@@ -4,12 +4,14 @@ extern crate touptek;
 use std::cell::RefCell;
 
 pub mod geometry;
+pub mod property;
 pub mod image;
 pub mod widget;
 
 pub use ui::geometry::{Point, Rect, Direction};
+pub use ui::property::Property;
 pub use ui::image::Image;
-pub use ui::widget::{Widget, Container, Label, Slider, BoxLayout, Frame};
+pub use ui::widget::{Widget, Container, Label, Slider, SliderPosition, BoxLayout, Frame};
 
 // Overlay
 
@@ -71,7 +73,6 @@ impl<'nvg, 'elt> Overlay<'nvg, 'elt> {
             let mut new_hovered = None;
             for frame in &self.frames {
                 if let Some((widget, proj_point)) = frame.project(point) {
-                    println!("offset: {:?}", point - proj_point);
                     new_hovered = Some((widget, point - proj_point));
                     break
                 }
@@ -99,6 +100,13 @@ impl<'nvg, 'elt> Overlay<'nvg, 'elt> {
         state.mouse_at = point;
         if let Some((widget, offset)) = state.hovered {
             widget.mouse_move(state.mouse_at - offset);
+        }
+    }
+
+    pub fn mouse_scroll(&self, offset: Point) {
+        let state = self.state.borrow();
+        if let Some((widget, _)) = state.hovered {
+            widget.mouse_scroll(offset)
         }
     }
 
