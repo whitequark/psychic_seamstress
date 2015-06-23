@@ -8,6 +8,13 @@ use ui::{Point, Rect, Direction};
 
 // Generic
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum State {
+    Passive,
+    Hovered,
+    Active,
+}
+
 pub trait Widget {
     fn is(&self, other: &Widget) -> bool {
         (self as *const _ as *const ()) == (other as *const _ as *const ())
@@ -17,6 +24,7 @@ pub trait Widget {
     fn set_size(&self, size: Point);
     fn size_request(&self) -> Point;
 
+    fn prepare(&self) {}
     fn need_reflow(&self) -> bool {
         let Point(rw, rh) = self.size_request();
         let Point(aw, ah) = self.size();
@@ -25,7 +33,7 @@ pub trait Widget {
 
     fn render(&self);
 
-    fn hover(&self, _point: Point) -> Option<&Widget> { None }
+    fn project(&self, _point: Point) -> Option<(&Widget, Point)> { None }
     fn mouse_move(&self, _point: Point) {}
     fn mouse_down(&self, _point: Point) {}
     fn mouse_up(&self, _point: Point) {}
@@ -75,9 +83,9 @@ impl Style {
         static STYLE: Style = Style {
             font_face: "Roboto",
             font_size: 32.,
-            active_color: nanovg::Color::rgb_f(1., 1., 1.),
-            hover_color: nanovg::Color::rgb_f(1., 0.5, 0.),
             passive_color: nanovg::Color::rgb_f(0.5, 0.5, 0.5),
+            hover_color: nanovg::Color::rgb_f(1., 0.5, 0.),
+            active_color: nanovg::Color::rgb_f(1., 1., 1.),
             background_color: nanovg::Color::rgb_f(0.15, 0.15, 0.15),
             line_size: 4.,
             frame_corner_size: 10.,
@@ -100,15 +108,18 @@ struct LabelState {
 }
 
 impl<'nvg> Label<'nvg> {
-    pub fn new(nvg: &'nvg nanovg::Context, text: &str) -> Label<'nvg> {
+    pub fn new(nvg: &'nvg nanovg::Context) -> Label<'nvg> {
         Label {
             nvg: nvg,
             state: RefCell::new(LabelState {
-                text: String::from(text),
+                text: String::from(""),
                 size: Point(0., 0.),
             })
         }
     }
+
+    pub fn text(&self) -> String { self.state.borrow().text.clone() }
+    pub fn set_text(&self, text: &str) { self.state.borrow_mut().text = String::from(text) }
 }
 
 impl<'nvg> Widget for Label<'nvg> {
@@ -132,6 +143,142 @@ impl<'nvg> Widget for Label<'nvg> {
         self.nvg.fill_color(Style::get().active_color);
         self.nvg.text_align(nanovg::LEFT | nanovg::TOP);
         self.nvg.text(0., 0., &state.text);
+    }
+}
+
+// Slider
+
+pub struct Slider<'nvg> {
+    nvg: &'nvg nanovg::Context,
+    update: Box<Fn(f32) + 'nvg>,
+    state: RefCell<SliderState>,
+}
+
+struct SliderState {
+    min: f32,
+    max: f32,
+    step: f32,
+    value: f32,
+    size: Point,
+    ui_state: State,
+}
+
+impl<'nvg> Slider<'nvg> {
+    pub fn new<U>(nvg: &'nvg nanovg::Context, update: U) -> Slider<'nvg>
+            where U: Fn(f32) + 'nvg {
+        Slider {
+            nvg: nvg,
+            update: Box::new(update),
+            state: RefCell::new(SliderState {
+                min: 0.,
+                max: 10.,
+                step: 1.,
+                value: 0.,
+                size: Point(0., 0.),
+                ui_state: State::Passive,
+            })
+        }
+    }
+
+    pub fn min(&self) -> f32 { self.state.borrow().min }
+    pub fn set_min(&self, mut value: f32) {
+        let max = self.max();
+        if value > max { value = max }
+        self.state.borrow_mut().min = value
+    }
+
+    pub fn max(&self) -> f32 { self.state.borrow().max }
+    pub fn set_max(&self, mut value: f32) {
+        let min = self.min();
+        if value < min { value = min }
+        self.state.borrow_mut().max = value
+    }
+
+    pub fn step(&self) -> f32 { self.state.borrow().step }
+    pub fn set_step(&self, mut value: f32) {
+        if value < 1. { value = 1. }
+        self.state.borrow_mut().step = value
+    }
+
+    pub fn value(&self) -> f32 { self.state.borrow().value }
+    pub fn set_value(&self, mut value: f32) {
+        let (min, max) = (self.min(), self.max());
+        if value < min { value = min }
+        if value > max { value = max }
+        self.state.borrow_mut().value = value;
+        (*self.update)(value)
+    }
+
+    fn slider_offset() -> f32 { Style::get().font_size / 2. }
+    fn puck_radius() -> f32 { Slider::slider_offset() / 2. }
+}
+
+impl<'nvg> Widget for Slider<'nvg> {
+    fn size(&self) -> Point { self.state.borrow().size }
+    fn set_size(&self, size: Point) { self.state.borrow_mut().size = size }
+
+    fn size_request(&self) -> Point {
+        Point(Slider::slider_offset() * 20.,
+              Slider::slider_offset() * 2. + Style::get().line_size)
+    }
+
+    fn render(&self) {
+        let state = self.state.borrow();
+        let norm_value = (state.value - state.min) / (state.max - state.min);
+
+        let mid_y = self.size().1 / 2.;
+        let (left_x, right_x) = (Slider::slider_offset(), self.size().0 - Slider::slider_offset());
+        let puck_x = left_x + (right_x - left_x) * norm_value;
+
+        self.nvg.stroke_width(Style::get().line_size);
+
+        self.nvg.stroke_color(match state.ui_state {
+            State::Passive | State::Hovered => Style::get().active_color,
+            State::Active => Style::get().hover_color
+        });
+        self.nvg.begin_path();
+        self.nvg.move_to(left_x, mid_y);
+        self.nvg.line_to(right_x, mid_y);
+        self.nvg.stroke();
+
+        self.nvg.fill_color(match state.ui_state {
+            State::Passive => Style::get().active_color,
+            State::Hovered | State::Active => Style::get().hover_color
+        });
+        self.nvg.begin_path();
+        self.nvg.circle(puck_x, mid_y, Slider::puck_radius());
+        self.nvg.fill();
+    }
+
+    fn project(&self, point: Point) -> Option<(&Widget, Point)> {
+        Some((self, point))
+    }
+
+    fn mouse_in(&self) {
+        self.state.borrow_mut().ui_state = State::Hovered
+    }
+
+    fn mouse_down(&self, point: Point) {
+        self.state.borrow_mut().ui_state = State::Active;
+        self.mouse_move(point);
+    }
+
+    fn mouse_move(&self, point: Point) {
+        let (left_x, right_x) = (Slider::slider_offset(), self.size().0 - Slider::slider_offset());
+        let norm_value = (point.0 - left_x) / (right_x - left_x);
+        if self.state.borrow().ui_state == State::Active {
+            let new_value = (norm_value * (self.max() - self.min()) / self.step())
+                            .round() * self.step();
+            self.set_value(new_value);
+        }
+    }
+
+    fn mouse_up(&self, _point: Point) {
+        self.state.borrow_mut().ui_state = State::Hovered
+    }
+
+    fn mouse_out(&self) {
+        self.state.borrow_mut().ui_state = State::Passive
     }
 }
 
@@ -204,6 +351,10 @@ impl<'nvg> Widget for BoxLayout<'nvg> {
         }
     }
 
+    fn prepare(&self) {
+        for child in &self.children { child.prepare() }
+    }
+
     fn need_reflow(&self) -> bool {
         self.children.iter().fold(false, |acc, child| { acc || child.need_reflow() })
     }
@@ -226,13 +377,13 @@ impl<'nvg> Widget for BoxLayout<'nvg> {
         }
     }
 
-    fn hover(&self, point: Point) -> Option<&Widget> {
+    fn project(&self, point: Point) -> Option<(&Widget, Point)> {
         let mut origin = Point(0., 0.);
         for child in &self.children {
             let size = child.size();
 
             if Rect(origin, size).contains(point) {
-                return child.hover(point - origin)
+                return child.project(point - origin)
             }
 
             match self.direction {
@@ -351,17 +502,17 @@ impl<'nvg> Widget for Frame<'nvg> {
         self.nvg.restore();
     }
 
-    fn hover(&self, point: Point) -> Option<&Widget> {
+    fn project(&self, point: Point) -> Option<(&Widget, Point)> {
         let state = self.state.borrow();
         let origin = state.position + Frame::content_offset();
 
         if Rect(origin, self.widget.size()).contains(point) {
-            match self.widget.hover(point - origin) {
-                Some(widget) => Some(widget),
-                None => Some(self)
+            match self.widget.project(point - origin) {
+                Some(result) => Some(result),
+                None => Some((self, Point(0., 0.)))
             }
         } else if Rect(state.position, self.size()).contains(point) {
-            Some(self)
+            Some((self, Point(0., 0.)))
         } else {
             None
         }
@@ -380,7 +531,7 @@ impl<'nvg> Widget for Frame<'nvg> {
         let mut state = self.state.borrow_mut();
         match state.moving {
             Some(origin) => state.position = (point - origin).round(),
-            None => self.widget.mouse_move(point)
+            None => ()
         }
     }
 }

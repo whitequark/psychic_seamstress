@@ -8,7 +8,9 @@ pub mod image;
 pub mod widget;
 
 pub use ui::image::Image;
-pub use ui::widget::{Widget, Container, Label, BoxLayout, Frame};
+pub use ui::widget::{Widget, Container,
+                     Label, Slider, BoxLayout,
+                     Frame};
 
 // Geometry
 
@@ -68,7 +70,7 @@ pub struct Overlay<'nvg, 'elt> {
 
 struct OverlayState<'elt> {
     mouse_at: Point,
-    hovered: Option<&'elt Widget>,
+    hovered: Option<(&'elt Widget, Point)>,
     captured: bool,
 }
 
@@ -88,6 +90,8 @@ impl<'nvg, 'elt> Overlay<'nvg, 'elt> {
 
     pub fn prepare(&self) {
         for frame in &self.frames {
+            frame.prepare();
+
             if frame.need_reflow() {
                 let size = frame.size_request();
                 frame.set_size(size);
@@ -101,7 +105,7 @@ impl<'nvg, 'elt> Overlay<'nvg, 'elt> {
         }
 
         self.nvg.save();
-        self.nvg.global_alpha(0.7);
+        self.nvg.global_alpha(0.8);
         for frame in &self.frames {
             frame.render()
         }
@@ -114,49 +118,51 @@ impl<'nvg, 'elt> Overlay<'nvg, 'elt> {
         if !state.captured {
             let mut new_hovered = None;
             for frame in &self.frames {
-                if let Some(hovered) = frame.hover(point) {
-                    new_hovered = Some(hovered);
+                if let Some((widget, proj_point)) = frame.project(point) {
+                    println!("offset: {:?}", point - proj_point);
+                    new_hovered = Some((widget, point - proj_point));
                     break
                 }
             }
 
             match (state.hovered, new_hovered) {
                 (None, None) => (),
-                (Some(widget), None) => {
+                (Some((widget, _)), None) => {
                     widget.mouse_out()
                 },
-                (None, Some(widget)) => {
+                (None, Some((widget, _))) => {
                     widget.mouse_in()
                 },
-                (Some(old_widget), Some(new_widget)) => {
+                (Some((old_widget, _)), Some((new_widget, _))) => {
                     if !old_widget.is(new_widget) {
                         old_widget.mouse_out();
                         new_widget.mouse_in()
                     }
                 }
             };
+
             state.hovered = new_hovered
         }
 
         state.mouse_at = point;
-        if let Some(widget) = state.hovered {
-            widget.mouse_move(state.mouse_at);
+        if let Some((widget, offset)) = state.hovered {
+            widget.mouse_move(state.mouse_at - offset);
         }
     }
 
     pub fn mouse_down(&self) {
         let mut state = self.state.borrow_mut();
-        if let Some(widget) = state.hovered {
+        if let Some((widget, offset)) = state.hovered {
             state.captured = true;
-            widget.mouse_down(state.mouse_at)
+            widget.mouse_down(state.mouse_at - offset)
         }
     }
 
     pub fn mouse_up(&self) {
         let mut state = self.state.borrow_mut();
-        if let Some(widget) = state.hovered {
+        if let Some((widget, offset)) = state.hovered {
             state.captured = false;
-            widget.mouse_up(state.mouse_at)
+            widget.mouse_up(state.mouse_at - offset)
         }
     }
 }

@@ -1,4 +1,4 @@
-#![feature(const_fn, iter_arith)]
+#![feature(const_fn, iter_arith, borrow_state)]
 #![allow(unused_unsafe)]
 
 extern crate glfw;
@@ -112,10 +112,24 @@ fn main() {
     let nvg = NvgContext::create_gl3(nanovg::ANTIALIAS | nanovg::STENCIL_STROKES);
     nvg.create_font("Roboto", "res/Roboto-Regular.ttf").unwrap();
 
+    let exp_layout = {
+        let label = ui::Label::new(&nvg);
+        label.set_text(&format!("Exposure time: {} ms", 120.));
+
+        let slider = ui::Slider::new(&nvg, |value| { println!("{:?}", value); });
+        slider.set_min(0.);
+        slider.set_max(2000.);
+        slider.set_step(100.);
+        slider.set_value(120.);
+
+        let mut layout = ui::BoxLayout::vert(&nvg);
+        layout.add(Box::new(label));
+        layout.add(Box::new(slider));
+        layout
+    };
+
     let mut cfg_layout = ui::BoxLayout::vert(&nvg);
-    cfg_layout.add(Box::new(ui::Label::new(&nvg, "test")));
-    cfg_layout.add(Box::new(ui::Label::new(&nvg, "foobar")));
-    cfg_layout.add(Box::new(ui::Label::new(&nvg, "baz")));
+    cfg_layout.add(Box::new(exp_layout));
 
     let mut cfg_frame = ui::Frame::new(&nvg, Box::new(cfg_layout));
     cfg_frame.set_position(ui::Point(20.0, 20.0));
