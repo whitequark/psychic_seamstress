@@ -10,6 +10,7 @@ extern crate png;
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
+use std::path::Path;
 
 use glfw::Context as GlfwContext;
 use nanovg::Context as NvgContext;
@@ -27,6 +28,7 @@ enum Event {
         tint: u32,
     },
     CameraImage(touptek::Image),
+    CameraStillImage(touptek::Image),
     CameraDisconnected,
     Glfw(glfw::WindowEvent),
 }
@@ -37,6 +39,7 @@ enum CameraCmd {
     ExposureGain { percents: u16 },
     ColorTemperature(u32),
     Tint(u32),
+    Snap,
 }
 
 fn cam_hotplug_thread(tx: Sender<Event>) {
@@ -84,6 +87,11 @@ fn cam_thread(event_tx: Sender<Event>, cmd_rx: Receiver<CameraCmd>) {
                         set_alpha(&mut image.data, 255);
                         event_tx.send(Event::CameraImage(image)).unwrap()
                     },
+                    touptek::Event::StillImage => {
+                        let mut image = cam.pull_still_image(32);
+                        set_alpha(&mut image.data, 255);
+                        event_tx.send(Event::CameraStillImage(image)).unwrap()
+                    },
                     touptek::Event::Disconnected => {
                         event_tx.send(Event::CameraDisconnected).unwrap();
                         break
@@ -98,6 +106,7 @@ fn cam_thread(event_tx: Sender<Event>, cmd_rx: Receiver<CameraCmd>) {
 
                 for cmd in glfw::flush_messages(&cmd_rx) {
                     match cmd {
+                        CameraCmd::Connect => (),
                         CameraCmd::ExposureTime { microseconds } =>
                             cam.set_exposure_time(microseconds),
                         CameraCmd::ExposureGain { percents } =>
@@ -110,7 +119,8 @@ fn cam_thread(event_tx: Sender<Event>, cmd_rx: Receiver<CameraCmd>) {
                             cam.set_white_balance_temp_tint(
                                 touptek::WhiteBalanceTempTint {
                                     tint: tint, ..cam.white_balance_temp_tint() }),
-                        _ => ()
+                        CameraCmd::Snap =>
+                            cam.snap_index(cam.preview_size_index()),
                     }
                 }
             }
@@ -152,6 +162,7 @@ fn main() {
         glfw.create_window(1024, 768, "~psychic seamstress~", glfw::WindowMode::Windowed)
             .expect("Failed to create GLFW window.");
     window.set_mouse_button_polling(true);
+    window.set_key_polling(true);
     window.set_cursor_pos_polling(true);
     window.set_scroll_polling(true);
     window.make_current();
@@ -284,6 +295,15 @@ fn main() {
                 Event::CameraImage(image) => {
                     ui.background.from_touptek(image);
                 },
+                Event::CameraStillImage(touptek::Image {
+                    resolution: touptek::Resolution { width, height }, data, ..
+                }) => {
+                    let mut image = png::Image {
+                        width: width, height: height,
+                        pixels: png::PixelsByColorType::RGBA8(data)
+                    };
+                    png::store_png(&mut image, Path::new("/tmp/foo.png"));
+                },
                 Event::CameraDisconnected => {
                     camera_connected = false;
                     ui.background.from_png(png::load_png("res/nosignal.png").unwrap())
@@ -294,12 +314,14 @@ fn main() {
                     match event {
                         WindowEvent::CursorPos(x, y) =>
                             ui.mouse_move(Point(x as f32, y as f32) * pixel_ratio),
-                        WindowEvent::MouseButton(_button, Action::Press, _) =>
+                        WindowEvent::MouseButton(_button, Action::Press, _modifiers) =>
                             ui.mouse_down(),
-                        WindowEvent::MouseButton(_button, Action::Release, _) =>
+                        WindowEvent::MouseButton(_button, Action::Release, _modifiers) =>
                             ui.mouse_up(),
                         WindowEvent::Scroll(x, y) =>
                             ui.mouse_scroll(Point(x as f32, y as f32)),
+                        WindowEvent::Key(Key::Space, _, Action::Press, _modifiers) =>
+                            cmd_tx.send(CameraCmd::Snap).unwrap(),
                         _ => {}
                     }
                 }
