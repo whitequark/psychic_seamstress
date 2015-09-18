@@ -50,7 +50,7 @@ pub trait Container<'nvg> {
 }
 
 pub struct Iter<'a> {
-    elements: &'a Vec<Box<Widget>>,
+    elements: &'a Vec<Box<Widget + 'a>>,
     index: usize,
 }
 

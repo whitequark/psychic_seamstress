@@ -247,7 +247,7 @@ fn main() {
         gl!(ClearColor(0.0, 0.0, 0.0, 0.0));
         gl!(Clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT | STENCIL_BUFFER_BIT));
 
-        nvg.begin_frame(win_width, win_height, pixel_ratio);
+        nvg.begin_frame(win_width as u32, win_height as u32, pixel_ratio);
         ui.draw(Point(fb_width as f32, fb_height as f32));
         nvg.end_frame();
 

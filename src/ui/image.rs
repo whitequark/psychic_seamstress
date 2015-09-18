@@ -33,14 +33,14 @@ impl<'a> Image<'a> {
 
     pub fn from_touptek(&self, raw_image: touptek::Image) {
         let touptek::Resolution { width, height } = raw_image.resolution;
-        self.set(self.nvg.create_image_rgba(width as i32, height as i32, &raw_image.data).unwrap())
+        self.set(self.nvg.create_image_rgba(width, height, &raw_image.data).unwrap())
     }
 
     pub fn from_png(&self, raw_image: png::Image) {
         match raw_image.pixels {
             png::PixelsByColorType::RGBA8(ref data) =>
                 self.set(self.nvg.create_image_rgba(
-                            raw_image.width as i32, raw_image.height as i32, data).unwrap()),
+                            raw_image.width, raw_image.height, data).unwrap()),
             _ => panic!("unsupported non-RGBA png format")
         }
     }

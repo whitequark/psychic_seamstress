@@ -6,13 +6,14 @@ authors = ["whitequark <whitequark@whitequark.org>"]
 [dependencies]
 gl = "*"
 glfw = "*"
+touptek = "*"
 
 [dependencies.nanovg]
-git = "https://github.com/whitequark/nanovg-rs"
+git = "https://github.com/KevinKelley/nanovg-rs"
 features = ["gl3"]
-
-[dependencies.touptek]
-git = "https://github.com/whitequark/rust-touptek"
 
 [dependencies.png]
 git = "https://github.com/servo/rust-png"
+
+[profile.dev]
+opt-level = 2
