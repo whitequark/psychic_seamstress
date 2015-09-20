@@ -308,7 +308,7 @@ fn main() {
                         width: width, height: height,
                         pixels: png::PixelsByColorType::RGBA8(data)
                     };
-                    png::store_png(&mut image, Path::new("/tmp/foo.png"));
+                    png::store_png(&mut image, Path::new("/tmp/foo.png")).unwrap()
                 },
                 Event::CameraDisconnected => {
                     camera_connected = false;
