@@ -6,7 +6,12 @@ authors = ["whitequark <whitequark@whitequark.org>"]
 [dependencies]
 gl = "*"
 glfw = "*"
-touptek = "*"
+
+[dependencies.touptek]
+path = "/home/whitequark/Work/rust-touptek"
+
+[dependencies.xdg]
+git = "https://github.com/whitequark/rust-xdg"
 
 [dependencies.nanovg]
 git = "https://github.com/KevinKelley/nanovg-rs"
@@ -15,5 +20,5 @@ features = ["gl3"]
 [dependencies.png]
 git = "https://github.com/servo/rust-png"
 
-[profile.dev]
-opt-level = 2
+[dependencies.simd]
+git = "https://github.com/huonw/simd"

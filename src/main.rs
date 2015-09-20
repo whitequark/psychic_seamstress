@@ -1,4 +1,4 @@
-#![feature(const_fn, iter_arith)]
+#![feature(const_fn, iter_arith, alloc)]
 #![allow(unused_unsafe)]
 
 extern crate glfw;
@@ -6,6 +6,7 @@ extern crate gl;
 extern crate nanovg;
 extern crate touptek;
 extern crate png;
+extern crate simd;
 
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender, Receiver};
@@ -53,8 +54,13 @@ fn cam_hotplug_thread(tx: Sender<Event>) {
 
 fn cam_thread(event_tx: Sender<Event>, cmd_rx: Receiver<CameraCmd>) {
     fn set_alpha(rgba: &mut Vec<u8>, alpha: u8) {
-        for i in 0..rgba.len() / 4 {
-            unsafe { *rgba.get_unchecked_mut(i * 4 + 3) = alpha; }
+        let alpha = simd::u8x16::new(0, 0, 0, alpha, 0, 0, 0, alpha,
+                                     0, 0, 0, alpha, 0, 0, 0, alpha);
+        let mut index = 0;
+        let length = rgba.len();
+        while index < length {
+            (simd::u8x16::load( rgba, index) | alpha).store(rgba, index);
+            index += 16
         }
     }
 
