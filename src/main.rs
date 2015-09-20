@@ -162,7 +162,7 @@ fn main() {
     glfw.window_hint(glfw::WindowHint::OpenGlForwardCompat(true));
     glfw.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
     glfw.window_hint(glfw::WindowHint::OpenGlDebugContext(true));
-    glfw.window_hint(glfw::WindowHint::Resizable(false));
+    // glfw.window_hint(glfw::WindowHint::Resizable(false));
 
     let (mut window, events) =
         glfw.create_window(1024, 768, "~psychic seamstress~", glfw::WindowMode::Windowed)
