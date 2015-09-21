@@ -33,16 +33,10 @@ impl<'a> Image<'a> {
         self.nvg.delete_image(self.nvg_image.borrow_mut().take().unwrap());
     }
 
-    pub fn from_touptek(&self, raw_image: touptek::Image) {
+    pub fn from_touptek(&self, mut raw_image: touptek::Image) {
         let touptek::Resolution { width, height } = raw_image.resolution;
         self.set(self.nvg.create_image_rgba(width, height, &raw_image.data).unwrap());
-        unsafe { // LOLRUST
-            let mut data = raw_image.data;
-            let raw_vec = alloc::raw_vec::RawVec::from_raw_parts(
-                                data.as_mut_ptr(), data.capacity());
-            mem::forget(data);
-            mem::drop(raw_vec);
-        }
+        unsafe { raw_image.data.set_len(0) } // O(1) drop at -O1
     }
 
     pub fn from_png(&self, raw_image: png::Image) {
