@@ -5,7 +5,8 @@ extern crate nanovg;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use ui::{Property, Point, Rect, Direction};
+use property::Property;
+use ui::{Point, Rect, Direction};
 
 // Generic
 

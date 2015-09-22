@@ -3,9 +3,7 @@
 extern crate nanovg;
 extern crate touptek;
 extern crate png;
-extern crate alloc;
 
-use std::mem;
 use std::cell::RefCell;
 
 use ui::{Point, Rect};

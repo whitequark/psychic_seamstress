@@ -4,12 +4,10 @@ extern crate touptek;
 use std::cell::RefCell;
 
 pub mod geometry;
-pub mod property;
 pub mod image;
 pub mod widget;
 
 pub use ui::geometry::{Point, Rect, Direction};
-pub use ui::property::Property;
 pub use ui::image::Image;
 pub use ui::widget::{Widget, Container, Label, Slider, SliderPosition, BoxLayout, Frame};
 

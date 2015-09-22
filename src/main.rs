@@ -1,145 +1,30 @@
-#![feature(const_fn, iter_arith, alloc)]
-#![allow(unused_unsafe)]
+#![feature(const_fn, iter_arith, plugin, custom_derive, mpsc_select)]
+#![allow(unused_unsafe, dead_code)]
+#![plugin(serde_macros)]
 
 extern crate glfw;
 extern crate gl;
 extern crate nanovg;
-extern crate touptek;
 extern crate png;
-extern crate simd;
+extern crate serde;
+extern crate touptek;
 
 use std::rc::Rc;
+use std::cell::RefCell;
 use std::sync::mpsc::{channel, Sender, Receiver};
-use std::thread;
 use std::path::Path;
+use std::thread;
 
 use glfw::Context as GlfwContext;
 use nanovg::Context as NvgContext;
 
+use property::Property;
 use ui::*;
 
-mod ui;
-
-enum Event {
-    CameraHotplug,
-    CameraConnected {
-        exposure_time_microseconds: u32,
-        exposure_gain_percents: u16,
-        color_temperature: u32,
-        tint: u32,
-    },
-    CameraImage(touptek::Image),
-    CameraStillImage(touptek::Image),
-    CameraDisconnected,
-    Glfw(glfw::WindowEvent),
-}
-
-enum CameraCmd {
-    Connect,
-    ExposureTime { microseconds: u32 },
-    ExposureGain { percents: u16 },
-    ColorTemperature(u32),
-    Tint(u32),
-    Snap,
-}
-
-fn cam_hotplug_thread(tx: Sender<Event>) {
-    touptek::Toupcam::hotplug(|rx| {
-        loop {
-            rx.recv().unwrap();
-            tx.send(Event::CameraHotplug).unwrap()
-        }
-    })
-}
-
-fn cam_thread(event_tx: Sender<Event>, cmd_rx: Receiver<CameraCmd>) {
-    fn set_alpha(rgba: &mut Vec<u8>, alpha: u8) {
-        let alpha = simd::u8x16::new(0, 0, 0, alpha, 0, 0, 0, alpha,
-                                     0, 0, 0, alpha, 0, 0, 0, alpha);
-        let mut index = 0;
-        let length = rgba.len();
-        while index < length {
-            (simd::u8x16::load( rgba, index) | alpha).store(rgba, index);
-            index += 16
-        }
-    }
-
-    loop {
-        match cmd_rx.recv().unwrap() {
-            CameraCmd::Connect => (),
-            _ => continue
-        }
-
-        let cam = match touptek::Toupcam::open(None) {
-            Some(cam) => cam,
-            None => continue,
-        };
-
-        cam.set_preview_size_index(0); // largest
-        cam.set_automatic_exposure(false);
-
-        cam.start(|cam_rx| {
-            event_tx.send(Event::CameraConnected {
-                exposure_time_microseconds: cam.exposure_time(),
-                exposure_gain_percents: cam.exposure_gain(),
-                color_temperature: cam.white_balance_temp_tint().temperature,
-                tint: cam.white_balance_temp_tint().tint,
-            }).unwrap();
-
-            loop {
-                match cam_rx.recv().unwrap() {
-                    touptek::Event::Image => {
-                        let mut image = cam.pull_image(32);
-                        set_alpha(&mut image.data, 255);
-                        event_tx.send(Event::CameraImage(image)).unwrap()
-                    },
-                    touptek::Event::StillImage => {
-                        let mut image = cam.pull_still_image(32);
-                        set_alpha(&mut image.data, 255);
-                        event_tx.send(Event::CameraStillImage(image)).unwrap()
-                    },
-                    touptek::Event::Disconnected => {
-                        event_tx.send(Event::CameraDisconnected).unwrap();
-                        break
-                    },
-                    touptek::Event::Exposure => {
-                        /* ignore */
-                    },
-                    event => {
-                        println!("unknown camera event: {:?}", event);
-                    }
-                }
-
-                for cmd in glfw::flush_messages(&cmd_rx) {
-                    match cmd {
-                        CameraCmd::Connect => (),
-                        CameraCmd::ExposureTime { microseconds } =>
-                            cam.set_exposure_time(microseconds),
-                        CameraCmd::ExposureGain { percents } =>
-                            cam.set_exposure_gain(percents),
-                        CameraCmd::ColorTemperature(temp) =>
-                            cam.set_white_balance_temp_tint(
-                                touptek::WhiteBalanceTempTint {
-                                    temperature: temp, ..cam.white_balance_temp_tint() }),
-                        CameraCmd::Tint(tint) =>
-                            cam.set_white_balance_temp_tint(
-                                touptek::WhiteBalanceTempTint {
-                                    tint: tint, ..cam.white_balance_temp_tint() }),
-                        CameraCmd::Snap =>
-                            cam.snap_index(cam.preview_size_index()),
-                    }
-                }
-            }
-        })
-    }
-}
-
-fn glfw_event_thread(rx: Receiver<(f64, glfw::WindowEvent)>, tx: Sender<Event>) {
-    loop {
-        let (_time, event) = rx.recv().unwrap();
-        tx.send(Event::Glfw(event)).unwrap();
-    }
-}
+pub mod property;
+pub mod config;
+pub mod camera;
+pub mod ui;
 
 macro_rules! gl {
     ($e: expr) => ({
@@ -150,12 +35,24 @@ macro_rules! gl {
 }
 
 fn main() {
-    let (event_tx, event_rx) = channel();
-    event_tx.send(Event::CameraHotplug).unwrap();
+    // let config = Rc::new(RefCell::new(config::load()));
 
-    let (cmd_tx, cmd_rx) = channel();
-    { let event_tx = event_tx.clone(); thread::spawn(move || { cam_hotplug_thread(event_tx) }) };
-    { let event_tx = event_tx.clone(); thread::spawn(move || { cam_thread(event_tx, cmd_rx) }) };
+    enum Event {
+        Camera(camera::Event),
+        Glfw(glfw::WindowEvent),
+    }
+    let (event_tx, event_rx) = channel();
+
+    let (mut camera, camera_event_rx) = camera::Camera::new();
+    {
+        let event_tx = event_tx.clone();
+        thread::spawn(move || {
+            loop {
+                let event = camera_event_rx.recv().unwrap();
+                event_tx.send(Event::Camera(event)).unwrap();
+            }
+        });
+    }
 
     let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
     glfw.window_hint(glfw::WindowHint::ContextVersion(3, 2));
@@ -164,7 +61,7 @@ fn main() {
     glfw.window_hint(glfw::WindowHint::OpenGlDebugContext(true));
     // glfw.window_hint(glfw::WindowHint::Resizable(false));
 
-    let (mut window, events) =
+    let (mut window, glfw_event_rx) =
         glfw.create_window(1024, 768, "~psychic seamstress~", glfw::WindowMode::Windowed)
             .expect("Failed to create GLFW window.");
     window.set_mouse_button_polling(true);
@@ -172,8 +69,15 @@ fn main() {
     window.set_cursor_pos_polling(true);
     window.set_scroll_polling(true);
     window.make_current();
-    { let event_tx = event_tx.clone();
-      thread::spawn(move || { glfw_event_thread(events, event_tx) }) };
+    {
+        let event_tx = event_tx.clone();
+        thread::spawn(move || {
+            loop {
+                let (_time, event) = glfw_event_rx.recv().unwrap();
+                event_tx.send(Event::Glfw(event)).unwrap()
+            }
+        })
+    };
 
     // use glfw to load GL function pointers
     gl!(load_with(|name| window.get_proc_address(name)));
@@ -187,59 +91,51 @@ fn main() {
     let nvg = NvgContext::create_gl3(nanovg::ANTIALIAS | nanovg::STENCIL_STROKES);
     nvg.create_font("Roboto", "res/Roboto-Regular.ttf").unwrap();
 
-    fn cam_slider<'a, F: Fn(f32) -> CameraCmd + 'static>(
-            nvg: &'a NvgContext, cmd_tx: &Sender<CameraCmd>,
-            name: String, unit: String, position: SliderPosition,
-            map_event: F) -> (BoxLayout<'a>, Rc<Property<SliderPosition>>) {
+    let mut cfg_layout = BoxLayout::vert(&nvg);
+
+    fn slider<'a>(nvg: &'a NvgContext, name: String, unit: String, position: SliderPosition) ->
+                        (BoxLayout<'a>, Rc<Property<SliderPosition>>) {
         let label = Label::new(&nvg);
         let slider = Slider::new(&nvg, position);
 
-        let label_text = label.text();
         let slider_pos = slider.position();
-
-        let cmd_tx = cmd_tx.clone();
-        slider_pos.observe(move |position| {
-            label_text.set(format!("{}: {}{}", name, position.current, unit));
-            cmd_tx.send(map_event(position.current)).unwrap()
-        });
+        slider_pos.map_propagate(label.text(), move |position|
+            format!("{}: {}{}", name, position.current, unit));
 
         let mut layout = BoxLayout::vert(&nvg);
         layout.add(Box::new(label));
         layout.add(Box::new(slider));
 
         (layout, slider_pos)
-    };
+    }
 
-    let mut cfg_layout = BoxLayout::vert(&nvg);
-
-    fn exposure_time_cmd(value: f32) -> CameraCmd {
-        CameraCmd::ExposureTime { microseconds: (value * 1000.) as u32 } }
-    let (widget, exposure_time_pos) = cam_slider(&nvg, &cmd_tx,
-        String::from("Exposure time"), String::from("ms"),
-        SliderPosition { minimum: 1., maximum: 2000., step: 5., current: 120. },
-        exposure_time_cmd);
+    // Exposure time slider
+    let (widget, exposure_time_pos) = slider(&nvg,
+        "Exposure time".to_string(), "ms".to_string(),
+        SliderPosition { minimum: 1., maximum: 2000., step: 5., current: 0. });
+    exposure_time_pos.map_propagate(camera.exposure_time_us(),
+                                    |value| (value.current * 1000.) as u32);
     cfg_layout.add(Box::new(widget));
 
-    fn exposure_gain_cmd(value: f32) -> CameraCmd {
-        CameraCmd::ExposureGain { percents: value as u16 } }
-    let (widget, exposure_gain_pos) = cam_slider(&nvg, &cmd_tx,
-        String::from("Exposure gain"), String::from("%"),
-        SliderPosition { minimum: 100., maximum: 500., step: 1., current: 100. },
-        exposure_gain_cmd);
+    // Exposure gain slider
+    let (widget, exposure_gain_pos) = slider(&nvg,
+        "Exposure gain".to_string(), "%".to_string(),
+        SliderPosition { minimum: 100., maximum: 500., step: 1., current: 0. });
+    exposure_gain_pos.map_propagate(camera.exposure_gain_pct(), |value| value.current as u16);
     cfg_layout.add(Box::new(widget));
 
-    fn color_temp_cmd(value: f32) -> CameraCmd { CameraCmd::ColorTemperature(value as u32) }
-    let (widget, color_temp_pos) = cam_slider(&nvg, &cmd_tx,
-        String::from("Color temperature"), String::from("K"),
-        SliderPosition { minimum: 2000., maximum: 15000., step: 10., current: 6503. },
-        color_temp_cmd);
+    // Color temperature slider
+    let (widget, color_temp_pos) = slider(&nvg,
+        "Color temperature".to_string(), "K".to_string(),
+        SliderPosition { minimum: 2000., maximum: 15000., step: 10., current: 0. });
+    color_temp_pos.map_propagate(camera.color_temperature_k(), |value| value.current as u32);
     cfg_layout.add(Box::new(widget));
 
-    fn tint_cmd(value: f32) -> CameraCmd { CameraCmd::Tint(value as u32) }
-    let (widget, tint_pos) = cam_slider(&nvg, &cmd_tx,
-        String::from("Tint"), String::from(""),
-        SliderPosition { minimum: 200., maximum: 2500., step: 10., current: 1000. },
-        tint_cmd);
+    // Tint slider
+    let (widget, tint_pos) = slider(&nvg,
+        "Tint".to_string(), "".to_string(),
+        SliderPosition { minimum: 200., maximum: 2500., step: 10., current: 0. });
+    tint_pos.map_propagate(camera.tint(), |value| value.current as u32);
     cfg_layout.add(Box::new(widget));
 
     let mut cfg_frame = Frame::new(&nvg, Box::new(cfg_layout));
@@ -273,44 +169,25 @@ fn main() {
         // Handle events
         for event in glfw::flush_messages(&event_rx) {
             match event {
-                Event::CameraHotplug => {
-                    if !camera_connected { cmd_tx.send(CameraCmd::Connect).unwrap() }
+                Event::Camera(camera::Event::Hotplug(_)) => {
+                    if !camera_connected { camera.connect(None) }
                 }
-                Event::CameraConnected {
-                    exposure_time_microseconds, exposure_gain_percents,
-                    color_temperature, tint
-                } => {
+                Event::Camera(camera::Event::Connect) => {
                     camera_connected = true;
-                    exposure_time_pos.set(SliderPosition {
-                        current: (exposure_time_microseconds / 1000) as f32,
-                         ..exposure_time_pos.get()
-                    });
-                    exposure_gain_pos.set(SliderPosition {
-                        current: exposure_gain_percents as f32,
-                         ..exposure_gain_pos.get()
-                    });
-                    color_temp_pos.set(SliderPosition {
-                        current: color_temperature as f32,
-                         ..color_temp_pos.get()
-                    });
-                    tint_pos.set(SliderPosition {
-                        current: tint as f32,
-                         ..tint_pos.get()
-                    });
                 }
-                Event::CameraImage(image) => {
+                Event::Camera(camera::Event::Image(image)) => {
                     ui.background.from_touptek(image);
-                },
-                Event::CameraStillImage(touptek::Image {
+                }
+                Event::Camera(camera::Event::StillImage(touptek::Image {
                     resolution: touptek::Resolution { width, height }, data, ..
-                }) => {
+                })) => {
                     let mut image = png::Image {
                         width: width, height: height,
                         pixels: png::PixelsByColorType::RGBA8(data)
                     };
                     png::store_png(&mut image, Path::new("/tmp/foo.png")).unwrap()
-                },
-                Event::CameraDisconnected => {
+                }
+                Event::Camera(camera::Event::Disconnect) => {
                     camera_connected = false;
                     ui.background.from_png(png::load_png("res/nosignal.png").unwrap())
                 }
@@ -327,7 +204,11 @@ fn main() {
                         WindowEvent::Scroll(x, y) =>
                             ui.mouse_scroll(Point(x as f32, y as f32)),
                         WindowEvent::Key(Key::Space, _, Action::Press, _modifiers) =>
-                            cmd_tx.send(CameraCmd::Snap).unwrap(),
+                            camera.snap(),
+                        WindowEvent::Key(Key::Escape, _, Action::Press, _modifiers) => {
+                            // config::store(&*config.borrow());
+                            return
+                        }
                         _ => {}
                     }
                 }
