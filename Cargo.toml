@@ -15,7 +15,7 @@ xdg = "^2.0"
 git = "https://github.com/whitequark/rust-touptek"
 
 [dependencies.nanovg]
-git = "https://github.com/KevinKelley/nanovg-rs"
+git = "https://github.com/whitequark/nanovg-rs"
 features = ["gl3"]
 
 [dependencies.png]

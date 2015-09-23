@@ -88,7 +88,7 @@ fn main() {
     gl!(Enable(SCISSOR_TEST));
 
     let nvg = NvgContext::create_gl3(nanovg::ANTIALIAS | nanovg::STENCIL_STROKES);
-    nvg.create_font("Roboto", "res/Roboto-Regular.ttf").unwrap();
+    nvg.create_font_mem("Roboto", include_bytes!("../res/Roboto-Regular.ttf")).unwrap();
 
     let mut cfg_layout = BoxLayout::vert(&nvg);
 
@@ -148,7 +148,7 @@ fn main() {
     cfg_frame.set_position(Point(20.0, 20.0));
 
     let mut ui = Overlay::new(&nvg);
-    ui.background.from_png(png::load_png("res/nosignal.png").unwrap());
+    ui.background.from_png(png::load_png_from_memory(include_bytes!("../res/nosignal.png")).unwrap());
     ui.frames.push(cfg_frame);
 
     let mut camera_connected = false;
