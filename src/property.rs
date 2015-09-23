@@ -93,15 +93,38 @@ impl<T> Property<T> where T: 'static {
     }
 
     pub fn read<F, R>(&self, mut reader: F) -> R where F: FnMut(&T) -> R {
+        let observable = self.0.borrow();
         let mut result = None;
-        self.0.borrow().read(&mut |value| result = Some(reader(value)));
+        observable.read(&mut |value| result = Some(reader(value)));
         result.unwrap()
     }
 
     pub fn write<F, R>(&self, mut writer: F) -> R where F: FnMut(&mut T) -> R {
+        let mut observable = self.0.borrow_mut();
         let mut result = None;
-        self.0.borrow_mut().write(&mut |value| result = Some(writer(value)));
+        observable.write(&mut |value| result = Some(writer(value)));
         result.unwrap()
+    }
+
+    pub fn observe<F>(&self, observer: F)
+            where F: Fn(&T) + 'static {
+        let mut observable = self.0.borrow_mut();
+        observable.observe(Box::new(observer))
+    }
+
+    pub fn link<MT, MF, U>(&self, other: Rc<Property<U>>, map_to: MT, map_from: MF)
+            where MT: Fn(&U, T) -> U + 'static, MF: Fn(&U) -> T + 'static, U: 'static {
+        let mut observers = self.0.borrow_mut().destruct();
+
+        *self.0.borrow_mut() = Box::new(Proxy {
+            property: other,
+            map_to:   Box::new(map_to),
+            map_from: Rc::new(Box::new(map_from))
+        });
+
+        for observer in observers.drain(..) {
+            self.0.borrow_mut().observe(observer)
+        }
     }
 
     pub fn get(&self) -> T where T: Clone {
@@ -110,11 +133,6 @@ impl<T> Property<T> where T: 'static {
 
     pub fn set(&self, new_value: T) where T: Clone {
         self.write(move |value| *value = new_value.clone())
-    }
-
-    pub fn observe<F>(&self, observer: F)
-            where F: Fn(&T) + 'static {
-        self.0.borrow_mut().observe(Box::new(observer))
     }
 
     pub fn notify<M, R>(&self, channel: &Sender<R>, map: M)
@@ -126,20 +144,5 @@ impl<T> Property<T> where T: 'static {
     pub fn propagate<M, R>(&self, other: Rc<Property<R>>, map: M)
             where M: Fn(&T) -> R + 'static, R: 'static {
         self.observe(move |value| { other.write(|other_value| *other_value = map(value)) })
-    }
-
-    pub fn link<MT, MF, U>(&self, other: Rc<Property<U>>, map_to: MT, map_from: MF)
-            where MT: Fn(&U, T) -> U + 'static, MF: Fn(&U) -> T + 'static, U: 'static {
-        let mut unlinked = Box::new(Proxy {
-            property: other,
-            map_to:   Box::new(map_to),
-            map_from: Rc::new(Box::new(map_from))
-        }) as Box<Observable<_>>;
-        mem::swap(&mut *self.0.borrow_mut(), &mut unlinked);
-
-        let mut observers = unlinked.destruct();
-        for observer in observers.drain(..) {
-            self.0.borrow_mut().observe(observer)
-        }
     }
 }

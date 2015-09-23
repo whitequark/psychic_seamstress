@@ -10,10 +10,9 @@ extern crate png;
 extern crate touptek;
 
 use std::rc::Rc;
-use std::cell::RefCell;
-use std::sync::mpsc::{channel, Sender, Receiver};
 use std::path::Path;
 use std::thread;
+use std::sync::mpsc::channel;
 
 use glfw::Context as GlfwContext;
 use nanovg::Context as NvgContext;
@@ -43,7 +42,7 @@ fn main() {
     }
     let (event_tx, event_rx) = channel();
 
-    let (mut camera, camera_event_rx) = camera::Camera::new();
+    let (camera, camera_event_rx) = camera::Camera::new();
     {
         let event_tx = event_tx.clone();
         thread::spawn(move || {
