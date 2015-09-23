@@ -195,6 +195,7 @@ pub struct Slider<'nvg> {
     nvg: &'nvg nanovg::Context,
     state: RefCell<SliderState>,
     position: Rc<Property<SliderPosition>>,
+    current_position: Rc<Property<f32>>,
 }
 
 struct SliderState {
@@ -204,17 +205,23 @@ struct SliderState {
 
 impl<'nvg> Slider<'nvg> {
     pub fn new(nvg: &'nvg nanovg::Context, position: SliderPosition) -> Slider<'nvg> {
+        let position = Property::with_validator(position, SliderPosition::validator);
+        let current_position = Property::derived(position.clone(),
+            |position, current| SliderPosition { current: current, ..*position },
+            |position|        position.current);
         Slider {
             nvg: nvg,
             state: RefCell::new(SliderState {
                 size: Point(0., 0.),
                 ui_state: State::Passive,
             }),
-            position: Property::with_validator(position, SliderPosition::validator),
+            position: position,
+            current_position: current_position,
         }
     }
 
     pub fn position(&self) -> Rc<Property<SliderPosition>> { self.position.clone() }
+    pub fn current_position(&self) -> Rc<Property<f32>> { self.current_position.clone() }
 
     fn slider_offset() -> f32 { Style::get().font_size / 2. }
     fn puck_radius() -> f32 { Slider::slider_offset() / 2. }

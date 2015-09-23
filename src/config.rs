@@ -1,14 +1,24 @@
 extern crate xdg;
 extern crate serde_json;
 
+use std::rc::Rc;
 use std::fs::File;
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+use property::Property;
+
+#[derive(Serialize, Deserialize, Default)]
 pub struct Config {
-    pub exposure_time_milliseconds: u32,
-    pub exposure_gain_percents: u16,
-    pub color_temperature: u32,
-    pub tint: u32,
+    exposure_time_us: Rc<Property<u32>>,
+    exposure_gain_pct: Rc<Property<u16>>,
+    color_temperature_k: Rc<Property<u32>>,
+    tint: Rc<Property<u32>>,
+}
+
+impl Config {
+    pub fn exposure_time_us(&self) -> Rc<Property<u32>> { self.exposure_time_us.clone() }
+    pub fn exposure_gain_pct(&self) -> Rc<Property<u16>> { self.exposure_gain_pct.clone() }
+    pub fn color_temperature_k(&self) -> Rc<Property<u32>> { self.color_temperature_k.clone() }
+    pub fn tint(&self) -> Rc<Property<u32>> { self.tint.clone() }
 }
 
 fn xdg_dirs() -> xdg::BaseDirectories {

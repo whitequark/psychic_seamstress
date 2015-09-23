@@ -3,6 +3,8 @@ use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender};
 use std::mem;
 
+use serde;
+
 trait Observable<T> {
     fn read(&self, reader: &mut FnMut(&T));
     fn write(&mut self, writer: &mut FnMut(&mut T));
@@ -14,6 +16,17 @@ struct Root<T> {
     value:     T,
     validator: Box<FnMut(&mut T)>,
     observers: Vec<Box<FnMut(&T)>>
+}
+
+impl<T> Root<T> where T: 'static {
+    fn new<V>(initial: T, validator: V) -> Box<Observable<T>>
+            where V: FnMut(&mut T) + 'static {
+        Box::new(Root {
+            value:     initial,
+            validator: Box::new(validator),
+            observers: Vec::new()
+        })
+    }
 }
 
 impl<T> Observable<T> for Root<T> {
@@ -41,13 +54,54 @@ impl<T> Observable<T> for Root<T> {
     }
 }
 
-struct Proxy<T, U> {
+struct Linked<T> {
+    property:  Rc<Property<T>>
+}
+
+impl<T> Linked<T> where T: 'static {
+    fn new(other: Rc<Property<T>>) -> Box<Observable<T>> {
+        Box::new(Linked {
+            property: other
+        })
+    }
+}
+
+impl<T> Observable<T> for Linked<T> {
+    fn read(&self, reader: &mut FnMut(&T)) {
+        self.property.0.borrow().read(reader)
+    }
+
+    fn write(&mut self, writer: &mut FnMut(&mut T)) {
+        self.property.0.borrow_mut().write(writer)
+    }
+
+    fn observe(&mut self, observer: Box<FnMut(&T) + 'static>) {
+        self.property.0.borrow_mut().observe(observer)
+    }
+
+    fn destruct(&mut self) -> Vec<Box<FnMut(&T)>> {
+        Vec::new()
+    }
+}
+
+struct Derived<T, U> {
     property: Rc<Property<U>>,
     map_to:   Box<Fn(&U, T) -> U + 'static>,
     map_from: Rc<Box<Fn(&U) -> T + 'static>>
 }
 
-impl<T, U> Observable<T> for Proxy<T, U> where T: 'static, U: 'static {
+impl<T, U> Derived<T, U> where T: 'static, U: 'static {
+    fn new<MT, MF>(other: Rc<Property<U>>, map_to: MT, map_from: MF) -> Box<Observable<T>>
+            where MT: Fn(&U, T) -> U + 'static, MF: Fn(&U) -> T + 'static {
+        Box::new(Derived {
+            property: other.clone(),
+            map_to:   Box::new(map_to),
+            map_from: Rc::new(Box::new(map_from))
+        })
+    }
+}
+
+impl<T, U> Observable<T> for Derived<T, U> where T: 'static, U: 'static {
     fn read(&self, reader: &mut FnMut(&T)) {
         let observable = self.property.0.borrow();
         observable.read(&mut |linked_value|
@@ -79,17 +133,44 @@ pub struct Property<T>(RefCell<Box<Observable<T>>>);
 
 impl<T> Property<T> where T: 'static {
     pub fn new(initial: T) -> Rc<Property<T>> {
-        Property::with_validator(initial, |_| ())
+        Rc::new(Property(RefCell::new(Root::new(initial, |_| ()))))
     }
 
     pub fn with_validator<V>(mut initial: T, mut validator: V) -> Rc<Property<T>>
             where V: FnMut(&mut T) + 'static {
         validator(&mut initial);
-        Rc::new(Property(RefCell::new(Box::new(Root {
-            value:     initial,
-            validator: Box::new(validator),
-            observers: Vec::new()
-        }))))
+        Rc::new(Property(RefCell::new(Root::new(initial, validator))))
+    }
+
+    pub fn linked(other: Rc<Property<T>>) -> Rc<Property<T>> {
+        Rc::new(Property(RefCell::new(Linked::new(other))))
+    }
+
+    pub fn derived<MT, MF, U>(other: Rc<Property<U>>, map_to: MT, map_from: MF) -> Rc<Property<T>>
+            where MT: Fn(&U, T) -> U + 'static, MF: Fn(&U) -> T + 'static, U: 'static {
+        Rc::new(Property(RefCell::new(Derived::new(other, map_to, map_from))))
+    }
+
+    pub fn link(&self, other: Rc<Property<T>>) {
+        let mut replaced = Linked::new(other);
+        mem::swap(&mut *self.0.borrow_mut(), &mut replaced);
+
+        let mut observers = replaced.destruct();
+        for observer in observers.drain(..) {
+            self.0.borrow_mut().observe(observer)
+        }
+    }
+
+    pub fn derive<MT, MF, U>(&self, other: Rc<Property<U>>,
+                             map_to: MT, map_from: MF)
+            where MT: Fn(&U, T) -> U + 'static, MF: Fn(&U) -> T + 'static, U: 'static {
+        let mut replaced = Derived::new(other, map_to, map_from);
+        mem::swap(&mut *self.0.borrow_mut(), &mut replaced);
+
+        let mut observers = replaced.destruct();
+        for observer in observers.drain(..) {
+            self.0.borrow_mut().observe(observer)
+        }
     }
 
     pub fn read<F, R>(&self, mut reader: F) -> R where F: FnMut(&T) -> R {
@@ -112,21 +193,6 @@ impl<T> Property<T> where T: 'static {
         observable.observe(Box::new(observer))
     }
 
-    pub fn link<MT, MF, U>(&self, other: Rc<Property<U>>, map_to: MT, map_from: MF)
-            where MT: Fn(&U, T) -> U + 'static, MF: Fn(&U) -> T + 'static, U: 'static {
-        let mut observers = self.0.borrow_mut().destruct();
-
-        *self.0.borrow_mut() = Box::new(Proxy {
-            property: other,
-            map_to:   Box::new(map_to),
-            map_from: Rc::new(Box::new(map_from))
-        });
-
-        for observer in observers.drain(..) {
-            self.0.borrow_mut().observe(observer)
-        }
-    }
-
     pub fn get(&self) -> T where T: Clone {
         self.read(|value| value.clone())
     }
@@ -144,5 +210,38 @@ impl<T> Property<T> where T: 'static {
     pub fn propagate<M, R>(&self, other: Rc<Property<R>>, map: M)
             where M: Fn(&T) -> R + 'static, R: 'static {
         self.observe(move |value| { other.write(|other_value| *other_value = map(value)) })
+    }
+}
+
+impl<T> Default for Property<T> where T: Default + 'static {
+    fn default() -> Property<T> {
+        let value = Default::default();
+        Property(RefCell::new(Box::new(Root {
+            value:     value,
+            validator: Box::new(|_| ()),
+            observers: Vec::new()
+        })))
+    }
+}
+
+impl<T> serde::Serialize for Property<T> where T: serde::Serialize + 'static, {
+    #[inline]
+    fn serialize<S>(&self, serializer: &mut S) -> Result<(), S::Error>
+        where S: serde::Serializer,
+    {
+        self.read(|value| value.serialize(serializer))
+    }
+}
+
+impl<T> serde::Deserialize for Property<T> where T: serde::Deserialize + 'static {
+    fn deserialize<D>(deserializer: &mut D) -> Result<Property<T>, D::Error>
+        where D: serde::Deserializer,
+    {
+        let value = try!(serde::Deserialize::deserialize(deserializer));
+        Ok(Property(RefCell::new(Box::new(Root {
+            value:     value,
+            validator: Box::new(|_| ()),
+            observers: Vec::new()
+        }))))
     }
 }

@@ -7,9 +7,9 @@ authors = ["whitequark <whitequark@whitequark.org>"]
 gl = "*"
 glfw = "*"
 xdg = "^2.0"
-#serde = "*"
-#serde_json = "*"
-#serde_macros = "*"
+serde = "*"
+serde_json = "*"
+serde_macros = "*"
 
 [dependencies.touptek]
 git = "https://github.com/whitequark/rust-touptek"

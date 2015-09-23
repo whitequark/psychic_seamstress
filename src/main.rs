@@ -1,12 +1,12 @@
 #![feature(const_fn, iter_arith, plugin, custom_derive, mpsc_select, drain)]
 #![allow(unused_unsafe, dead_code)]
-// #![plugin(serde_macros)]
+#![plugin(serde_macros)]
 
 extern crate glfw;
 extern crate gl;
 extern crate nanovg;
 extern crate png;
-// extern crate serde;
+extern crate serde;
 extern crate touptek;
 
 use std::rc::Rc;
@@ -21,7 +21,7 @@ use property::Property;
 use ui::*;
 
 pub mod property;
-// pub mod config;
+pub mod config;
 pub mod camera;
 pub mod ui;
 
@@ -34,7 +34,7 @@ macro_rules! gl {
 }
 
 fn main() {
-    // let config = Rc::new(RefCell::new(config::load()));
+    let config = config::load();
 
     enum Event {
         Camera(camera::Event),
@@ -52,6 +52,11 @@ fn main() {
             }
         });
     }
+
+    config.exposure_time_us().propagate(camera.exposure_time_us(), |x| *x);
+    config.exposure_gain_pct().propagate(camera.exposure_gain_pct(), |x| *x);
+    config.color_temperature_k().propagate(camera.color_temperature_k(), |x| *x);
+    config.tint().propagate(camera.tint(), |x| *x);
 
     let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
     glfw.window_hint(glfw::WindowHint::ContextVersion(3, 2));
@@ -97,22 +102,25 @@ fn main() {
         let label = Label::new(&nvg);
         let slider = Slider::new(&nvg, position);
 
-        let slider_pos = slider.position();
-        slider_pos.propagate(label.text(), move |position|
-            format!("{}: {}{}", name, position.current, unit));
+        let position = slider.position();
+        let current_position = slider.current_position();
+        current_position.propagate(label.text(), move |value|
+            format!("{}: {}{}", name, value, unit));
 
         let mut layout = BoxLayout::vert(&nvg);
         layout.add(Box::new(label));
         layout.add(Box::new(slider));
 
-        (layout, slider_pos)
+        (layout, position)
     }
 
     // Exposure time slider
     let (widget, exposure_time_pos) = slider(&nvg,
         "Exposure time".to_string(), "ms".to_string(),
         SliderPosition { minimum: 1., maximum: 2000., step: 5., current: 0. });
-    camera.exposure_time_us().link(exposure_time_pos.clone(),
+    exposure_time_pos.write(|slider|
+        slider.current = (config.exposure_time_us().get() / 1000) as f32);
+    config.exposure_time_us().derive(exposure_time_pos.clone(),
        |slider, value| SliderPosition { current: (value / 1000) as f32, ..*slider },
        |slider|        (slider.current * 1000.) as u32);
     cfg_layout.add(Box::new(widget));
@@ -121,7 +129,9 @@ fn main() {
     let (widget, exposure_gain_pos) = slider(&nvg,
         "Exposure gain".to_string(), "%".to_string(),
         SliderPosition { minimum: 100., maximum: 500., step: 1., current: 0. });
-    camera.exposure_gain_pct().link(exposure_gain_pos.clone(),
+    exposure_time_pos.write(|slider|
+        slider.current = config.exposure_gain_pct().get() as f32);
+    config.exposure_gain_pct().derive(exposure_gain_pos.clone(),
         |slider, value| SliderPosition { current: value as f32, ..*slider },
         |slider|        slider.current as u16);
     cfg_layout.add(Box::new(widget));
@@ -130,7 +140,9 @@ fn main() {
     let (widget, color_temp_pos) = slider(&nvg,
         "Color temperature".to_string(), "K".to_string(),
         SliderPosition { minimum: 2000., maximum: 15000., step: 10., current: 0. });
-    camera.color_temperature_k().link(color_temp_pos.clone(),
+    color_temp_pos.write(|slider|
+        slider.current = config.color_temperature_k().get() as f32);
+    config.color_temperature_k().derive(color_temp_pos.clone(),
         |slider, value| SliderPosition { current: value as f32, ..*slider },
         |slider|        slider.current as u32);
     cfg_layout.add(Box::new(widget));
@@ -139,7 +151,9 @@ fn main() {
     let (widget, tint_pos) = slider(&nvg,
         "Tint".to_string(), "".to_string(),
         SliderPosition { minimum: 200., maximum: 2500., step: 10., current: 0. });
-    camera.tint().link(tint_pos.clone(),
+    tint_pos.write(|slider|
+        slider.current = config.tint().get() as f32);
+    config.tint().derive(tint_pos.clone(),
         |slider, value| SliderPosition { current: value as f32, ..*slider },
         |slider|        slider.current as u32);
     cfg_layout.add(Box::new(widget));
@@ -212,7 +226,7 @@ fn main() {
                         WindowEvent::Key(Key::Space, _, Action::Press, _modifiers) =>
                             camera.snap(),
                         WindowEvent::Key(Key::Escape, _, Action::Press, _modifiers) => {
-                            // config::store(&*config.borrow());
+                            config::store(&config);
                             return
                         }
                         _ => {}
