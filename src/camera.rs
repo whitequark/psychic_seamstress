@@ -38,19 +38,19 @@ impl Camera {
         let (cmd_tx, cmd_rx) = channel();
 
         let exposure_time_us = Property::new(120000);
-        exposure_time_us.map_notify(&cmd_tx, |value|
+        exposure_time_us.notify(&cmd_tx, |value|
             Command::SetExposureTime { microseconds: *value });
 
         let exposure_gain_pct = Property::new(100);
-        exposure_gain_pct.map_notify(&cmd_tx, |value|
+        exposure_gain_pct.notify(&cmd_tx, |value|
             Command::SetExposureGain { percents: *value });
 
         let color_temperature_k = Property::new(6503);
-        color_temperature_k.map_notify(&cmd_tx, |value|
+        color_temperature_k.notify(&cmd_tx, |value|
             Command::SetColorTemperature { kelvin: *value });
 
         let tint = Property::new(1000);
-        tint.map_notify(&cmd_tx, |value|
+        tint.notify(&cmd_tx, |value|
             Command::SetTint(*value));
 
         thread::spawn(move || camera_thread(event_tx, cmd_rx));

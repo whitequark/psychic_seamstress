@@ -158,14 +158,13 @@ pub struct SliderPosition {
 }
 
 impl SliderPosition {
-    pub fn validator(mut self) -> SliderPosition {
+    pub fn validator(&mut self) {
         if self.maximum < self.minimum { self.maximum = self.minimum }
         if self.step < 1e-6 { self.step = 1e-6 }
         if self.current < self.minimum { self.current = self.minimum }
         if self.current > self.maximum { self.current = self.maximum }
         self.current = self.minimum +
-            ((self.current - self.minimum) / self.step).round() * self.step;
-        self
+            ((self.current - self.minimum) / self.step).round() * self.step
     }
 
     pub fn size(&self) -> f32 {
@@ -211,7 +210,7 @@ impl<'nvg> Slider<'nvg> {
                 size: Point(0., 0.),
                 ui_state: State::Passive,
             }),
-            position: Property::new_validated(position, SliderPosition::validator),
+            position: Property::with_validator(position, SliderPosition::validator),
         }
     }
 

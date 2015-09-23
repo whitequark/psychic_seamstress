@@ -1,12 +1,12 @@
-#![feature(const_fn, iter_arith, plugin, custom_derive, mpsc_select)]
+#![feature(const_fn, iter_arith, plugin, custom_derive, mpsc_select, drain)]
 #![allow(unused_unsafe, dead_code)]
-#![plugin(serde_macros)]
+// #![plugin(serde_macros)]
 
 extern crate glfw;
 extern crate gl;
 extern crate nanovg;
 extern crate png;
-extern crate serde;
+// extern crate serde;
 extern crate touptek;
 
 use std::rc::Rc;
@@ -22,7 +22,7 @@ use property::Property;
 use ui::*;
 
 pub mod property;
-pub mod config;
+// pub mod config;
 pub mod camera;
 pub mod ui;
 
@@ -99,7 +99,7 @@ fn main() {
         let slider = Slider::new(&nvg, position);
 
         let slider_pos = slider.position();
-        slider_pos.map_propagate(label.text(), move |position|
+        slider_pos.propagate(label.text(), move |position|
             format!("{}: {}{}", name, position.current, unit));
 
         let mut layout = BoxLayout::vert(&nvg);
@@ -113,29 +113,36 @@ fn main() {
     let (widget, exposure_time_pos) = slider(&nvg,
         "Exposure time".to_string(), "ms".to_string(),
         SliderPosition { minimum: 1., maximum: 2000., step: 5., current: 0. });
-    exposure_time_pos.map_propagate(camera.exposure_time_us(),
-                                    |value| (value.current * 1000.) as u32);
+    camera.exposure_time_us().link(exposure_time_pos.clone(),
+       |slider, value| SliderPosition { current: (value / 1000) as f32, ..*slider },
+       |slider|        (slider.current * 1000.) as u32);
     cfg_layout.add(Box::new(widget));
 
     // Exposure gain slider
     let (widget, exposure_gain_pos) = slider(&nvg,
         "Exposure gain".to_string(), "%".to_string(),
         SliderPosition { minimum: 100., maximum: 500., step: 1., current: 0. });
-    exposure_gain_pos.map_propagate(camera.exposure_gain_pct(), |value| value.current as u16);
+    camera.exposure_gain_pct().link(exposure_gain_pos.clone(),
+        |slider, value| SliderPosition { current: value as f32, ..*slider },
+        |slider|        slider.current as u16);
     cfg_layout.add(Box::new(widget));
 
     // Color temperature slider
     let (widget, color_temp_pos) = slider(&nvg,
         "Color temperature".to_string(), "K".to_string(),
         SliderPosition { minimum: 2000., maximum: 15000., step: 10., current: 0. });
-    color_temp_pos.map_propagate(camera.color_temperature_k(), |value| value.current as u32);
+    camera.color_temperature_k().link(color_temp_pos.clone(),
+        |slider, value| SliderPosition { current: value as f32, ..*slider },
+        |slider|        slider.current as u32);
     cfg_layout.add(Box::new(widget));
 
     // Tint slider
     let (widget, tint_pos) = slider(&nvg,
         "Tint".to_string(), "".to_string(),
         SliderPosition { minimum: 200., maximum: 2500., step: 10., current: 0. });
-    tint_pos.map_propagate(camera.tint(), |value| value.current as u32);
+    camera.tint().link(tint_pos.clone(),
+        |slider, value| SliderPosition { current: value as f32, ..*slider },
+        |slider|        slider.current as u32);
     cfg_layout.add(Box::new(widget));
 
     let mut cfg_frame = Frame::new(&nvg, Box::new(cfg_layout));
